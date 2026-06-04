@@ -1358,3 +1358,839 @@
         </div>
     </div>
 </div>
+<!-- ===== PROFILE MODAL ===== -->
+<div class="modal-overlay" id="profileModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Мой профиль</h3>
+            <button class="modal-close" onclick="closeProfileModal()">✕</button>
+        </div>
+        <div class="modal-body" id="profileModalBody">
+            <!-- Rendered dynamically -->
+        </div>
+    </div>
+</div>
+
+<!-- ===== NEW CHAT MODAL ===== -->
+<div class="modal-overlay" id="newChatModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Новый чат</h3>
+            <button class="modal-close" onclick="closeNewChatModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="text" class="new-chat-search" placeholder="Поиск пользователя..." id="newChatSearch" oninput="filterContacts()">
+            <div class="contact-list" id="contactList">
+                <!-- Contacts rendered here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== TOAST CONTAINER ===== -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ============================================================
+// DATABASE (localStorage)
+// ============================================================
+const DB = {
+    getUsers() {
+        return JSON.parse(localStorage.getItem('rdm_users') || '{}');
+    },
+    saveUsers(users) {
+        localStorage.setItem('rdm_users', JSON.stringify(users));
+    },
+    getMessages() {
+        return JSON.parse(localStorage.getItem('rdm_messages') || '{}');
+    },
+    saveMessages(msgs) {
+        localStorage.setItem('rdm_messages', JSON.stringify(msgs));
+    },
+    getCurrentUser() {
+        const data = sessionStorage.getItem('rdm_current_user');
+        return data ? JSON.parse(data) : null;
+    },
+    setCurrentUser(user) {
+        if (user) sessionStorage.setItem('rdm_current_user', JSON.stringify(user));
+        else sessionStorage.removeItem('rdm_current_user');
+    },
+    getActiveChats() {
+        const user = this.getCurrentUser();
+        if (!user) return {};
+        return JSON.parse(localStorage.getItem(`rdm_active_${user.username}`) || '{}');
+    },
+    saveActiveChats(chats) {
+        const user = this.getCurrentUser();
+        if (!user) return;
+        localStorage.setItem(`rdm_active_${user.username}`, JSON.stringify(chats));
+    }
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let currentUser = null;
+let currentChatId = null;
+let selectedAvatarColor = 0;
+
+const AVATAR_COLORS = [
+    'linear-gradient(135deg, #e53935, #b71c1c)',
+    'linear-gradient(135deg, #ff5252, #d32f2f)',
+    'linear-gradient(135deg, #ff1744, #c62828)',
+    'linear-gradient(135deg, #ff6e40, #dd2c00)',
+    'linear-gradient(135deg, #ff3d00, #bf360c)',
+    'linear-gradient(135deg, #a50000, #7f0000)',
+];
+
+const BOT_CONTACTS = [
+    { id: 'bot_alex', username: 'alex_dev', displayName: 'Алексей Dev', bio: 'Full-stack разработчик 🚀', online: true },
+    { id: 'bot_maria', username: 'maria_design', displayName: 'Мария Designer', bio: 'UI/UX дизайнер ✨', online: true },
+    { id: 'bot_dmitry', username: 'dmitry_pm', displayName: 'Дмитрий PM', bio: 'Project Manager 📋', online: false },
+    { id: 'bot_sofia', username: 'sofia_data', displayName: 'София Analyst', bio: 'Data Scientist 📊', online: false },
+    { id: 'bot_ivan', username: 'ivan_crypto', displayName: 'Иван Crypto', bio: 'Blockchain developer 🔗', online: true },
+];
+
+const AUTO_REPLIES = [
+    "Привет! Как дела? 😊",
+    "Отличная идея!",
+    "Давай обсудим позже",
+    "Интересно, расскажи подробнее",
+    "Согласен! 💯",
+    "Хорошо, понял 👍",
+    "Ок, сделаю ASAP",
+    "Круто! 🔥",
+    "Нужно подумать над этим",
+    "Да, конечно!",
+    "Спасибо за информацию!",
+    "Буду через 5 минут",
+    "Отправь мне документы",
+    "Давай созвонимся завтра?",
+    "Уже в процессе работы 🛠️",
+    "Это действительно круто!",
+    "Посмотри мой новый проект",
+    "Как ты это сделал? 😮",
+    "Встретимся вечером?",
+    "Переслал тебе файлы"
+];
+
+// ============================================================
+// INITIALIZATION
+// ============================================================
+function init() {
+    currentUser = DB.getCurrentUser();
+    
+    // Seed some default contacts if none exist
+    const users = DB.getUsers();
+    if (Object.keys(users).length === 0) {
+        BOT_CONTACTS.forEach(c => {
+            users[c.username] = {
+                username: c.username,
+                displayName: c.displayName,
+                bio: c.bio,
+                password: '', // demo
+                online: c.online,
+                avatarColor: Math.floor(Math.random() * AVATAR_COLORS.length),
+                registeredAt: Date.now() - Math.random() * 10000000
+            };
+        });
+        DB.saveUsers(users);
+    }
+
+    if (currentUser) {
+        showApp();
+    } else {
+        showAuth();
+    }
+}
+
+// ============================================================
+// AUTH FUNCTIONS
+// ============================================================
+function switchAuthTab(tab) {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+    
+    if (tab === 'login') {
+        document.querySelectorAll('.auth-tab')[0].classList.add('active');
+        document.getElementById('loginForm').classList.add('active');
+    } else {
+        document.querySelectorAll('.auth-tab')[1].classList.add('active');
+        document.getElementById('registerForm').classList.add('active');
+    }
+    
+    // Clear messages
+    document.getElementById('loginError').style.display = 'none';
+    document.getElementById('registerError').style.display = 'none';
+    document.getElementById('registerSuccess').style.display = 'none';
+}
+
+function handleRegister(e) {
+    e.preventDefault();
+    const displayName = document.getElementById('regDisplayName').value.trim();
+    const username = document.getElementById('regUsername').value.trim().toLowerCase();
+    const email = document.getElementById('regEmail').value.trim();
+    const password = document.getElementById('regPassword').value;
+    const bio = document.getElementById('regBio').value.trim();
+
+    if (!displayName || !username || !email || !password) {
+        showAuthError('registerError', 'Заполните все обязательные поля');
+        return;
+    }
+
+    if (password.length < 6) {
+        showAuthError('registerError', 'Пароль должен быть минимум 6 символов');
+        return;
+    }
+
+    const users = DB.getUsers();
+    
+    if (users[username]) {
+        showAuthError('registerError', 'Имя пользователя уже занято');
+        return;
+    }
+
+    // Check email uniqueness
+    for (const key in users) {
+        if (users[key].email === email) {
+            showAuthError('registerError', 'Email уже зарегистрирован');
+            return;
+        }
+    }
+
+    users[username] = {
+        username,
+        displayName,
+        email,
+        password,
+        bio: bio || '',
+        online: true,
+        avatarColor: Math.floor(Math.random() * AVATAR_COLORS.length),
+        registeredAt: Date.now()
+    };
+
+    DB.saveUsers(users);
+    
+    document.getElementById('registerError').style.display = 'none';
+    const successEl = document.getElementById('registerSuccess');
+    successEl.textContent = 'Аккаунт создан! Переходим к входу...';
+    successEl.style.display = 'block';
+
+    showToast('Регистрация успешна!', 'success');
+
+    setTimeout(() => {
+        switchAuthTab('login');
+        document.getElementById('loginUsername').value = username;
+        document.getElementById('regBio').value = '';
+        document.getElementById('regPassword').value = '';
+        document.getElementById('regEmail').value = '';
+        document.getElementById('regDisplayName').value = '';
+        document.getElementById('regUsername').value = '';
+        successEl.style.display = 'none';
+    }, 1500);
+}
+
+function handleLogin(e) {
+    e.preventDefault();
+    const input = document.getElementById('loginUsername').value.trim().toLowerCase();
+    const password = document.getElementById('loginPassword').value;
+
+    if (!input || !password) {
+        showAuthError('loginError', 'Заполните все поля');
+        return;
+    }
+
+    const users = DB.getUsers();
+    let foundUser = null;
+    
+    if (users[input]) {
+        foundUser = users[input];
+        if (foundUser.password !== password) {
+            showAuthError('loginError', 'Неверный пароль');
+            return;
+        }
+    } else {
+        showAuthError('loginError', 'Пользователь не найден');
+        return;
+    }
+
+    currentUser = foundUser;
+    DB.setCurrentUser(currentUser);
+    
+    // Mark online
+    foundUser.online = true;
+    users[input] = foundUser;
+    DB.saveUsers(users);
+
+    showToast(`Добро пожаловать, ${currentUser.displayName}!`, 'success');
+    showApp();
+}
+
+function handleLogout() {
+    const users = DB.getUsers();
+    if (users[currentUser.username]) {
+        users[currentUser.username].online = false;
+        DB.saveUsers(users);
+    }
+    
+    currentUser = null;
+    DB.setCurrentUser(null);
+    currentChatId = null;
+    
+    closeSidebarMenu();
+    showAuth();
+    showToast('Вы вышли из аккаунта', 'success');
+}
+
+function showAuthError(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => el.style.display = 'none', 4000);
+}
+
+// ============================================================
+// SCREENS
+// ============================================================
+function showAuth() {
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('appScreen').classList.remove('active');
+}
+
+function showApp() {
+    document.getElementById('authScreen').style.display = 'none';
+    document.getElementById('appScreen').classList.add('active');
+    
+    updateMenuProfile();
+    renderChatList();
+}
+
+// ============================================================
+// SIDEBAR MENU
+// ============================================================
+function openSidebarMenu() {
+    document.getElementById('sidebarMenu').classList.add('active');
+    document.getElementById('menuOverlay').classList.add('active');
+}
+
+function closeSidebarMenu() {
+    document.getElementById('sidebarMenu').classList.remove('active');
+    document.getElementById('menuOverlay').classList.remove('active');
+}
+
+function updateMenuProfile() {
+    if (!currentUser) return;
+    
+    const initials = currentUser.displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    
+    document.getElementById('menuAvatar').textContent = initials || '👤';
+    document.getElementById('menuAvatar').style.background = AVATAR_COLORS[currentUser.avatarColor % AVATAR_COLORS.length];
+    document.getElementById('menuName').textContent = currentUser.displayName;
+    document.getElementById('menuBio').textContent = currentUser.bio || currentUser.username;
+}
+
+// ============================================================
+// CHAT LIST
+// ============================================================
+function getContacts() {
+    const users = DB.getUsers();
+    let contacts = [...BOT_CONTACTS];
+    
+    // Add real registered users (excluding bot ones)
+    for (const key in users) {
+        if (!contacts.find(c => c.username === key)) {
+            contacts.push({
+                id: key,
+                username: key,
+                displayName: users[key].displayName,
+                bio: users[key].bio || '',
+                online: users[key].online,
+                avatarColor: users[key].avatarColor || 0
+            });
+        }
+    }
+    
+    return contacts;
+}
+
+function getMessagesForChat(chatId) {
+    const allMsgs = DB.getMessages();
+    const key = Object.keys(allMsgs).find(k => 
+        k.includes(currentChatKey(currentUser?.username || '', chatId)) ||
+        k.includes(currentChatKey(chatId, currentUser?.username || ''))
+    );
+    
+    if (!key) return [];
+    return allMsgs[key] || [];
+}
+
+function currentChatKey(a, b) {
+    return [a, b].sort().join('_');
+}
+
+function renderChatList() {
+    const container = document.getElementById('chatList');
+    const contacts = getContacts();
+    const searchQuery = (document.getElementById('chatSearch')?.value || '').toLowerCase();
+    
+    if (!currentUser) return;
+    
+    // Get recent chat data
+    const activeChats = DB.getActiveChats();
+    
+    let html = '';
+    let firstOnlineFound = false;
+
+    contacts.forEach(contact => {
+        if (contact.id === currentUser.username && currentUser.username !== 'bot_alex') return;
+        
+        const chatKey = currentChatKey(currentUser.username, contact.id);
+        const chatData = activeChats[chatKey] || {};
+        const msgs = getMessagesForChat(contact.id);
+        const lastMsg = msgs[msgs.length - 1];
+        
+        // Filter by search
+        if (searchQuery && !contact.displayName.toLowerCase().includes(searchQuery) && 
+            !contact.username.toLowerCase().includes(searchQuery)) return;
+        
+        const unreadCount = chatData.unread || 0;
+        
+        const initials = contact.displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        const colorIdx = (contact.avatarColor !== undefined) ? contact.avatarColor : 
+            contact.id.charCodeAt(0) % AVATAR_COLORS.length;
+        
+        const isOnline = contact.online;
+        const preview = lastMsg ? (lastMsg.sender === currentUser.username ? 'Вы: ' : '') + lastMsg.text : 'Начните общение...';
+        const timeStr = lastMsg ? formatTime(lastMsg.timestamp) : '';
+        
+        if (!firstOnlineFound && isOnline) firstOnlineFound = true;
+
+        html += `
+            <div class="chat-item ${currentChatId === contact.id ? 'active' : ''} ${unreadCount > 0 ? 'unread' : ''}" 
+                 onclick="openChat('${contact.id}', '${contact.displayName.replace(/'/g, "\\'")}')">
+                <div class="chat-avatar" style="background: ${AVATAR_COLORS[colorIdx % AVATAR_COLORS.length]}">
+                    ${initials}
+                    ${isOnline ? '<div class="online-dot"></div>' : ''}
+                </div>
+                <div class="chat-item-info">
+                    <div class="chat-item-top">
+                        <span class="chat-item-name">${contact.displayName}</span>
+                        <span class="chat-item-time">${timeStr}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="chat-item-preview">${escapeHtml(preview)}</span>
+                        ${unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html || '<div style="text-align:center;padding:40px;color:var(--text-muted);">Нет чатов</div>';
+}
+
+function filterChats() {
+    renderChatList();
+}
+
+// ============================================================
+// OPEN CHAT
+// ============================================================
+function openChat(contactId, contactName) {
+    currentChatId = contactId;
+    
+    // Update header
+    const contacts = getContacts();
+    const contact = contacts.find(c => c.id === contactId);
+    
+    if (contact) {
+        const initials = contact.displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        const colorIdx = (contact.avatarColor !== undefined) ? contact.avatarColor : 
+            contact.id.charCodeAt(0) % AVATAR_COLORS.length;
+        
+        document.getElementById('chatHeaderAvatar').textContent = initials;
+        document.getElementById('chatHeaderAvatar').style.background = AVATAR_COLORS[colorIdx % AVATAR_COLORS.length];
+        document.getElementById('chatHeaderName').textContent = contact.displayName;
+        
+        const onlineEl = document.getElementById('chatHeaderOnline');
+        const statusEl = document.getElementById('chatHeaderStatus');
+        
+        if (contact.online) {
+            onlineEl.style.display = 'block';
+            statusEl.textContent = 'в сети';
+            statusEl.style.color = 'var(--online-green)';
+        } else {
+            onlineEl.style.display = 'none';
+            statusEl.textContent = 'был(а) недавно';
+            statusEl.style.color = 'var(--text-muted)';
+        }
+    }
+
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('chatView').style.display = 'flex';
+
+    // Mobile
+    document.getElementById('mainChat').classList.add('mobile-active');
+
+    // Clear unread
+    const chatKey = currentChatKey(currentUser.username, contactId);
+    const activeChats = DB.getActiveChats();
+    if (activeChats[chatKey]) {
+        activeChats[chatKey].unread = 0;
+        DB.saveActiveChats(activeChats);
+    }
+
+    renderMessages();
+    renderChatList();
+    
+    setTimeout(() => {
+        document.getElementById('messageInput').focus();
+    }, 100);
+}
+
+function goBack() {
+    document.getElementById('mainChat').classList.remove('mobile-active');
+    currentChatId = null;
+}
+
+// ============================================================
+// MESSAGES
+// ============================================================
+function renderMessages() {
+    if (!currentChatId || !currentUser) return;
+    
+    const area = document.getElementById('messagesArea');
+    const msgs = getMessagesForChat(currentChatId);
+    
+    if (msgs.length === 0) {
+        const contacts = getContacts();
+        const contact = contacts.find(c => c.id === currentChatId);
+        const name = contact ? contact.displayName : 'контакт';
+        
+        area.innerHTML = `
+            <div style="text-align:center;padding:60px 20px;color:var(--text-muted);">
+                <div style="font-size:48px;margin-bottom:16px;">🔥</div>
+                <p style="font-size:15px;">Начните разговор с ${escapeHtml(name)}</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    let lastDate = '';
+    
+    msgs.forEach((msg, i) => {
+        const msgDate = new Date(msg.timestamp).toLocaleDateString('ru-RU', { 
+            day: 'numeric', month: 'long', year: 'numeric' 
+        });
+        
+        if (msgDate !== lastDate) {
+            html += `<div class="message-date-divider"><span>${msgDate}</span></div>`;
+            lastDate = msgDate;
+        }
+        
+        const isSent = msg.sender === currentUser.username;
+        const time = new Date(msg.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        
+        html += `
+            <div class="message-wrapper ${isSent ? 'sent' : 'received'} ${i === 0 || msgs[i-1].sender !== msg.sender ? 'message-group-start' : ''}">
+                <div class="message-bubble">
+                    ${escapeHtml(msg.text)}
+                    <div class="msg-time">${time}${isSent ? ` <span class="message-status">✓✓</span>` : ''}</div>
+                </div>
+            </div>
+        `;
+    });
+
+    area.innerHTML = html;
+    
+    // Scroll to bottom
+    setTimeout(() => {
+        area.scrollTop = area.scrollHeight;
+    }, 50);
+}
+
+function sendMessage() {
+    if (!currentChatId || !currentUser) return;
+    
+    const input = document.getElementById('messageInput');
+    const text = input.value.trim();
+    if (!text) return;
+    
+    const msg = {
+        id: Date.now(),
+        sender: currentUser.username,
+        text: text,
+        timestamp: Date.now(),
+        status: 'sent'
+    };
+    
+    // Save message
+    const allMsgs = DB.getMessages();
+    const chatKey = currentChatKey(currentUser.username, currentChatId);
+    
+    if (!allMsgs[chatKey]) allMsgs[chatKey] = [];
+    allMsgs[chatKey].push(msg);
+    DB.saveMessages(allMsgs);
+    
+    // Update active chats
+    const contacts = getContacts();
+    const contact = contacts.find(c => c.id === currentChatId);
+    const activeChats = DB.getActiveChats();
+    
+    const myKey = currentChatKey(currentUser.username, currentChatId);
+    if (!activeChats[myKey]) {
+        activeChats[myKey] = { lastMessage: text, timestamp: Date.now(), unread: 0 };
+    }
+    activeChats[myKey].lastMessage = text;
+    activeChats[myKey].timestamp = Date.now();
+    DB.saveActiveChats(activeChats);
+
+    input.value = '';
+    renderMessages();
+    renderChatList();
+    
+    // Simulate bot reply
+    simulateReply(currentChatId);
+}
+
+function handleMessageKey(e) {
+    if (e.key === 'Enter') {
+        sendMessage();
+    }
+}
+
+// ============================================================
+// AUTO REPLY SIMULATION
+// ============================================================
+let replyTimers = {};
+
+function simulateReply(contactId) {
+    if (replyTimers[contactId]) clearTimeout(replyTimers[contactId]);
+    
+    const showTyping = () => {
+        if (currentChatId === contactId) {
+            document.getElementById('typingIndicator').classList.add('active');
+        }
+    };
+    
+    const hideTyping = () => {
+        document.getElementById('typingIndicator').classList.remove('active');
+    };
+    
+    // Show typing after 1-2s
+    replyTimers[contactId] = setTimeout(() => {
+        if (currentChatId !== contactId) return;
+        showTyping();
+        
+        const delay = 1500 + Math.random() * 2000;
+        
+        setTimeout(() => {
+            hideTyping();
+            
+            const replyMsg = {
+                id: Date.now() + 1,
+                sender: contactId,
+                text: AUTO_REPLIES[Math.floor(Math.random() * AUTO_REPLIES.length)],
+                timestamp: Date.now(),
+                status: 'received'
+            };
+            
+            const allMsgs = DB.getMessages();
+            const chatKey = currentChatKey(currentUser.username, contactId);
+            
+            if (!allMsgs[chatKey]) allMsgs[chatKey] = [];
+            allMsgs[chatKey].push(replyMsg);
+            DB.saveMessages(allMsgs);
+            
+            // Update active chats with unread if not in chat
+            const activeChats = DB.getActiveChats();
+            const theirKey = currentChatKey(contactId, currentUser.username);
+            if (currentChatId === contactId) {
+                activeChats[theirKey] = { lastMessage: replyMsg.text, timestamp: Date.now(), unread: 0 };
+            } else {
+                if (!activeChats[theirKey]) activeChats[theirKey] = { lastMessage: replyMsg.text, timestamp: Date.now(), unread: 0 };
+                activeChats[theirKey].unread = (activeChats[theirKey].unread || 0) + 1;
+            }
+            DB.saveActiveChats(activeChats);
+            
+            if (currentChatId === contactId) {
+                renderMessages();
+            }
+            renderChatList();
+        }, delay);
+    }, 1000 + Math.random() * 1500);
+}
+
+// ============================================================
+// PROFILE MODAL
+// ============================================================
+function openProfileModal() {
+    closeSidebarMenu();
+    
+    const body = document.getElementById('profileModalBody');
+    const initials = currentUser.displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    
+    body.innerHTML = `
+        <div class="profile-card">
+            <div class="p-avatar" id="editAvatar" style="background:${AVATAR_COLORS[currentUser.avatarColor % AVATAR_COLORS.length]}">${initials}</div>
+            <h4 id="editNameDisplay">${currentUser.displayName}</h4>
+            <p>@${currentUser.username}</p>
+        </div>
+        <div class="profile-edit-field">
+            <label>Имя</label>
+            <input type="text" id="editDisplayName" value="${currentUser.displayName}">
+        </div>
+        <div class="profile-edit-field">
+            <label>О себе</label>
+            <input type="text" id="editBio" value="${currentUser.bio || ''}">
+        </div>
+        <button class="btn-primary" onclick="saveProfile()" style="margin-top:8px;">Сохранить</button>
+        <div style="text-align:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--border-color);">
+            <p style="font-size:12px;color:var(--text-muted);">Ваш ID: ${currentUser.username}</p>
+            <p style="font-size:12px;color:var(--text-muted);">Настроен на красный стиль 🔥</p>
+        </div>
+    `;
+    
+    document.getElementById('profileModal').classList.add('active');
+}
+
+function closeProfileModal() {
+    document.getElementById('profileModal').classList.remove('active');
+}
+
+function saveProfile() {
+    const newName = document.getElementById('editDisplayName').value.trim();
+    const newBio = document.getElementById('editBio').value.trim();
+    
+    if (!newName) return;
+    
+    currentUser.displayName = newName;
+    currentUser.bio = newBio;
+    
+    const users = DB.getUsers();
+    users[currentUser.username] = currentUser;
+    DB.saveUsers(users);
+    
+    closeProfileModal();
+    updateMenuProfile();
+    renderChatList();
+    showToast('Профиль обновлён!', 'success');
+}
+
+// ============================================================
+// NEW CHAT MODAL
+// ============================================================
+function openNewChatModal() {
+    closeSidebarMenu();
+    document.getElementById('newChatSearch').value = '';
+    renderContactList();
+    document.getElementById('newChatModal').classList.add('active');
+}
+
+function closeNewChatModal() {
+    document.getElementById('newChatModal').classList.remove('active');
+}
+
+function renderContactList(filter = '') {
+    const container = document.getElementById('contactList');
+    const contacts = getContacts().filter(c => c.id !== currentUser?.username);
+    
+    let html = '';
+    contacts.forEach(contact => {
+        if (filter && !contact.displayName.toLowerCase().includes(filter.toLowerCase()) &&
+            !contact.username.toLowerCase().includes(filter.toLowerCase())) return;
+            
+        const initials = contact.displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        const colorIdx = (contact.avatarColor !== undefined) ? contact.avatarColor : 
+            contact.id.charCodeAt(0) % AVATAR_COLORS.length;
+        
+        html += `
+            <div class="contact-item" onclick="startChat('${contact.id}', '${escapeAttr(contact.displayName)}')">
+                <div class="contact-avatar" style="background:${AVATAR_COLORS[colorIdx % AVATAR_COLORS.length]}">${initials}</div>
+                <div>
+                    <div class="contact-name">${escapeHtml(contact.displayName)}</div>
+                    <div class="contact-status">${contact.online ? '🟢 в сети' : '⚫ не в сети'}</div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html || '<div style="text-align:center;padding:20px;color:var(--text-muted);">Никого не найдено</div>';
+}
+
+function filterContacts() {
+    const val = document.getElementById('newChatSearch').value;
+    renderContactList(val);
+}
+
+function startChat(contactId, contactName) {
+    closeNewChatModal();
+    
+    // Mark as online for demo purposes
+    const users = DB.getUsers();
+    if (users[contactId]) users[contactId].online = true;
+    DB.saveUsers(users);
+    
+    renderChatList();
+    openChat(contactId, contactName);
+    showToast(`Чат с ${contactName} открыт`, 'success');
+}
+
+// ============================================================
+// UTILITIES
+// ============================================================
+function formatTime(timestamp) {
+    const d = new Date(timestamp);
+    const now = new Date();
+    
+    if (d.toDateString() === now.toDateString()) {
+        return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    }
+    
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return 'вчера';
+    
+    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function escapeAttr(str) {
+    return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 3000);
+}
+
+// ============================================================
+// PERIODIC REFRESH (for online status changes)
+// ============================================================
+setInterval(() => {
+    if (currentUser) {
+        renderChatList();
+    }
+}, 10000);
+
+// ============================================================
+// INIT
+// ============================================================
+init();
+</script>
+
+</body>
+</html>
